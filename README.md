@@ -4,7 +4,7 @@ This is my submission for **Assignment 2: Dockerize a small app with a basic CI 
 
 The app itself was given to us. It's a small Flask app with two routes. My job was to put it in a Docker container, get it running, and set up GitHub Actions so the image gets built automatically every time I push.
 
-![Build](https://github.com/YOUR-USERNAME/flask-docker-ci/actions/workflows/build.yml/badge.svg)
+![Build](https://github.com/inshikagupta/flask-app-assignment/actions/workflows/build.yml/badge.svg)
 
 ---
 
@@ -140,7 +140,7 @@ If the build breaks (for example, a typo in the Dockerfile), the run fails and s
 
 **Successful workflow run**
 
-![github actions](screenshots/5-github-actions.png)
+![github actions](screenshots/github-action.png)
 
 ---
 
