@@ -11,4 +11,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t flask-devops-app .
+        run: docker build -t myapp .
+
+      - name: Run container
+        run: docker run -d --name myapp -p 5000:5000 myapp
+
+      - name: Check /health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fs localhost:5000/health; then
+              echo ""
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Waiting for the app to start..."
+            sleep 2
+          done
+          echo "Health check failed"
+          docker logs myapp
+          exit 1

@@ -2,9 +2,9 @@
 
 This is my submission for **Assignment 2: Dockerize a small app with a basic CI check**.
 
-The app itself was given to us. It's a small Flask app with two routes. My job was to put it in a Docker container, get it running, and set up GitHub Actions so the image gets built automatically every time I push.
+The app itself was given to us. It's a small Flask app with two routes. My job was to put it in a Docker container, get it running, set up GitHub Actions so the image gets built every time I push, and fix a teammate's Docker setup that wasn't working.
 
-![Build](https://github.com/YOUR-USERNAME/flask-docker-ci/actions/workflows/build.yml/badge.svg)
+![Build](https://github.com/inshikagupta/flask-app-assignment/actions/workflows/build.yml/badge.svg)
 
 ---
 
@@ -15,7 +15,8 @@ The app itself was given to us. It's a small Flask app with two routes. My job w
 | `app.py` | The Flask app. `/` returns a hello message and `/health` returns `{"status": "ok"}` |
 | `requirements.txt` | Python packages the app needs (just Flask) |
 | `Dockerfile` | Instructions for building the Docker image |
-| `.github/workflows/build.yml` | GitHub Actions workflow that builds the image on every push |
+| `.dockerignore` | Files I don't want copied into the image |
+| `.github/workflows/build.yml` | GitHub Actions workflow that builds the image and checks `/health` on every push |
 | `screenshots/` | Screenshots showing everything working |
 
 ---
@@ -32,17 +33,35 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 
+RUN useradd --create-home appuser
+USER appuser
+
 EXPOSE 5000
 
 CMD ["python", "app.py"]
 ```
 
-A quick explanation of what I did here:
+What each part does and why I wrote it this way:
 
 - I started from `python:3.12-slim` because it already has Python and is much smaller than the full image.
-- I copied `requirements.txt` and installed Flask **before** copying `app.py`. Docker caches each step, so if I only change the code later, it doesn't have to reinstall Flask every time.
+- I copied `requirements.txt` and installed Flask **before** copying `app.py`. Docker caches each step, so when I only change the code, it doesn't reinstall Flask every time.
+- `--no-cache-dir` stops pip from keeping its download cache, which makes the image a bit smaller.
+- `useradd` creates a normal user called `appuser`, and `USER appuser` makes the app run as that user instead of root. If someone ever got into the app, they wouldn't have root inside the container. I checked it with `docker exec <container> whoami` and it printed `appuser`.
 - `EXPOSE 5000` documents the port the app listens on.
 - `CMD` starts the app when the container runs.
+
+### .dockerignore
+
+```
+.git
+screenshots/
+README.md
+__pycache__
+.github/
+.DS_Store
+```
+
+None of these are needed to run the app, so I keep them out of the image. It also makes the build a little faster because Docker has less to send.
 
 ---
 
@@ -52,8 +71,8 @@ You only need Docker installed.
 
 **1. Clone the repo**
 ```bash
-git clone https://github.com/YOUR-USERNAME/flask-docker-ci.git
-cd flask-docker-ci
+git clone https://github.com/inshikagupta/flask-app-assignment.git
+cd flask-app-assignment
 ```
 
 **2. Build the image**
@@ -67,7 +86,7 @@ docker run -d -p 5001:5000 myapp
 ```
 `-d` runs it in the background, and `-p 5001:5000` connects port 5001 on my Mac to port 5000 inside the container.
 
-I first tried `-p 5000:5000`, but got `bind: address already in use`. On macOS, port 5000 is taken by AirPlay Receiver, so I mapped it to 5001 instead. The app inside the container still runs on 5000. On Linux or Windows, `-p 5000:5000` should work fine.
+I first tried `-p 5000:5000`, but got `bind: address already in use`. I'm using a MacBook, and on macOS port 5000 is taken by **AirPlay Receiver**, so I mapped it to 5001 instead. The app inside the container still runs on 5000, so I didn't have to change the app or the Dockerfile. On Linux or Windows, `-p 5000:5000` works fine and you can test with `curl localhost:5000/health`.
 
 **4. Test it**
 ```bash
@@ -93,11 +112,11 @@ docker stop <container-id>
 
 **Building the image**
 
-![docker build](screenshots/docker-build.png)
+![docker build](screenshots/docker_build.png)
 
 **Container running**
 
-![docker ps](screenshots/docker-ps.png)
+![docker ps](screenshots/docker_ps.png)
 
 **Health check with curl**
 
@@ -127,7 +146,25 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t flask-devops-app .
+        run: docker build -t myapp .
+
+      - name: Run container
+        run: docker run -d --name myapp -p 5000:5000 myapp
+
+      - name: Check /health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fs localhost:5000/health; then
+              echo ""
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Waiting for the app to start..."
+            sleep 2
+          done
+          echo "Health check failed"
+          docker logs myapp
+          exit 1
 ```
 
 Every time I push to GitHub, it:
@@ -135,30 +172,47 @@ Every time I push to GitHub, it:
 1. Starts a fresh Ubuntu machine
 2. Checks out my code
 3. Runs `docker build`
+4. Starts the container on port 5000 (no AirPlay on GitHub's Linux machines, so 5000 is free there)
+5. Calls `/health`. Flask needs a second or two to start, so instead of a fixed `sleep` it tries up to 10 times, 2 seconds apart. If the app never answers, it prints the container logs and fails the run.
 
-If the build breaks (for example, a typo in the Dockerfile), the run fails and shows a red ❌ in the Actions tab. I didn't push the image to a registry because the assignment said it wasn't required.
+If the build or the health check breaks, the run fails and shows a red ❌ in the Actions tab. I didn't push the image to a registry because the assignment said it wasn't required.
 
 **Successful workflow run**
 
-![github actions](screenshots/5-github-actions.png)
+![github actions](screenshots/github-action.png)
 
 ---
 
 ## Bugs found and fixed
 
-A teammate's version of this setup couldn't be reached. These are the problems I found and how I fixed them:
+A teammate wrote this setup, and the app couldn't be reached:
+
+```dockerfile
+FORM python:3.12-slim
+WORKDIR /app
+COPY . .
+RUN pip install -r requirement.txt
+CMD ["python", "app.py"]
+```
+
+Run with: `docker run -p 5000:8080 myapp`
+
+These are the problems I found and how I fixed them:
 
 | # | Problem | Why it broke | Fix |
 |---|---|---|---|
-| 1 | Flask was running on `127.0.0.1` | Inside a container, `127.0.0.1` only accepts connections from inside the container itself, so nothing outside could reach it | Changed it to `app.run(host="0.0.0.0", port=5000)` |
-| 2 | Container was started without `-p` | The port was never published to the host machine | Ran it with `docker run -p 5000:5000 myapp` |
-| 3 | Port mismatch between `EXPOSE`/`-p` and the app | Traffic was being sent to a port the app wasn't listening on | Used port 5000 everywhere |
-| 4 | `pip install` ran before `requirements.txt` was copied | The build failed because the file didn't exist yet | Moved `COPY requirements.txt .` above the `RUN pip install` line |
+| 1 | `FORM python:3.12-slim` | Typo. `FORM` isn't a Dockerfile instruction, so `docker build` fails on the very first line | Changed it to `FROM python:3.12-slim` |
+| 2 | `RUN pip install -r requirement.txt` | The file is called `requirements.txt` (with an **s**), so pip can't find it and the build fails | Changed it to `RUN pip install -r requirements.txt` |
+| 3 | `docker run -p 5000:8080 myapp` | `-p` is `host:container`, so this sends traffic to port **8080** inside the container. But Flask listens on port **5000**, so nothing answers. This is why the app "can't be reached" | Changed it to `docker run -p 5000:5000 myapp` (on my Mac I use `-p 5001:5000` because of AirPlay) |
+| 4 | No `EXPOSE` line (small one) | Doesn't break anything by itself, but nothing in the Dockerfile says which port the app uses, which is how a mix-up like bug 3 happens | Added `EXPOSE 5000` |
+
+On top of the fixes, I also changed `COPY . .` to copy `requirements.txt` first for better caching, added `--no-cache-dir`, and added the `.dockerignore` and the non-root user (these were the bonus points).
 
 ---
 
 ## What I learned
 
-- A container is isolated, so the app has to listen on `0.0.0.0` **and** the port has to be published with `-p`. Missing either one means you can't reach it.
-- The order of lines in a Dockerfile matters, both for whether it works and for build caching.
-- GitHub Actions is an easy way to catch broken builds without having to check by hand.
+- A container is isolated, so the app has to listen on `0.0.0.0` **and** the port has to be published with `-p`. The right side of `-p` has to match the port the app really uses inside the container.
+- The left side of `-p` is just any free port on my own machine. On my Mac, 5000 was taken by AirPlay, so I used 5001.
+- The order of lines in a Dockerfile matters, both for whether it builds and for how fast it rebuilds.
+- CI can do more than check that something builds. Starting the container and calling `/health` catches problems a build alone would miss.
